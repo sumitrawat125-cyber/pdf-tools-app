@@ -1,2 +1,9 @@
 streamlit
 PyPDF2
+camelot-py[cv]
+tabula-py
+pytesseract
+pdf2image
+Pillow
+reportlab
+opencv-python
