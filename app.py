@@ -1,5 +1,5 @@
 import streamlit as st
-from pypdf import PdfReader, PdfWriter
+from PyPDF2 import PdfReader, PdfWriter
 import io
 import zipfile
 from datetime import datetime
@@ -708,3 +708,4 @@ st.markdown("""
         <p>Made with ❤️ using Streamlit | © 2026 | 6 Tools in 1 App!</p>
     </div>
 """, unsafe_allow_html=True)
+
