@@ -1,4 +1,82 @@
 import streamlit as st
+
+# Custom CSS - ADD THIS FIRST
+st.markdown("""
+    <style>
+    /* Modern gradient theme */
+    .main {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    }
+    
+    .main > div {
+        background: white;
+        border-radius: 20px;
+        padding: 30px;
+        box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+    }
+    
+    /* Title */
+    .main h1 {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        font-size: 3rem;
+        font-weight: 700;
+        text-align: center;
+    }
+    
+    /* Sidebar */
+    [data-testid="stSidebar"] {
+        background: linear-gradient(180deg, #667eea 0%, #764ba2 100%);
+    }
+    
+    [data-testid="stSidebar"] h1, 
+    [data-testid="stSidebar"] label {
+        color: white !important;
+    }
+    
+    /* Buttons */
+    .stButton > button {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border: none;
+        border-radius: 12px;
+        padding: 12px 30px;
+        font-weight: 600;
+        box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+    }
+    
+    .stButton > button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
+    }
+    
+    /* Download buttons */
+    .stDownloadButton > button {
+        background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+        border-radius: 12px;
+        box-shadow: 0 4px 15px rgba(16, 185, 129, 0.4);
+    }
+    
+    /* Upload area */
+    [data-testid="stFileUploader"] {
+        background: #f3f4f6;
+        border: 3px dashed #667eea;
+        border-radius: 15px;
+        padding: 30px;
+    }
+    
+    /* Hide Streamlit branding */
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    </style>
+""", unsafe_allow_html=True)
+
+# NOW your existing code starts here
+st.set_page_config(page_title="PDF Tools Pro", page_icon="📄", layout="wide")
+
+# ... rest of your code
+import streamlit as st
 from PyPDF2 import PdfReader, PdfWriter
 import io
 from reportlab.pdfgen import canvas
@@ -914,5 +992,6 @@ elif tool == "🔍 OCR - Image to Searchable PDF":
 # Footer
 st.sidebar.markdown("---")
 st.sidebar.markdown("**Made for Accountants** 💼")
+
 
 
