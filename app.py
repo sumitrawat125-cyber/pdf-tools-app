@@ -264,10 +264,10 @@ elif tool == "🔓 Remove Password":
             else:
                 st.error("❌ Please enter the password")
 
-# TOOL 5: COMPRESS PDF (FIXED VERSION)
+# TOOL 5: COMPRESS PDF (ACTUALLY WORKS!)
 elif tool == "🗜️ Compress PDF":
     st.header("🗜️ Compress PDF")
-    st.info("📌 Reduce PDF file size with adjustable quality")
+    st.info("📌 Reduce PDF file size by compressing images")
     
     uploaded_file = st.file_uploader("Upload PDF", type=['pdf'], key="compress")
     
@@ -279,43 +279,108 @@ elif tool == "🗜️ Compress PDF":
         
         compression_level = st.select_slider(
             "Compression Level:",
-            options=["Low (Best Quality)", "Medium", "High (Smaller Size)", "Maximum"],
-            value="Medium"
+            options=["Low (Best Quality)", "Medium (Recommended)", "High (Smaller Size)", "Maximum (Smallest)"],
+            value="Medium (Recommended)"
         )
         
-        # Map compression levels to settings
-        compression_settings = {
-            "Low (Best Quality)": {"dpi": 150, "quality": 90},
-            "Medium": {"dpi": 100, "quality": 75},
-            "High (Smaller Size)": {"dpi": 72, "quality": 60},
-            "Maximum": {"dpi": 50, "quality": 40}
+        # Map compression levels to image quality
+        quality_settings = {
+            "Low (Best Quality)": 85,
+            "Medium (Recommended)": 60,
+            "High (Smaller Size)": 40,
+            "Maximum (Smallest)": 20
         }
         
-        settings = compression_settings[compression_level]
+        image_quality = quality_settings[compression_level]
         
         st.info(f"""
-        **Settings for {compression_level}:**
-        - Image Resolution: {settings['dpi']} DPI
-        - Image Quality: {settings['quality']}%
-        - Good for: {'Printing' if compression_level == 'Low (Best Quality)' else 'Email/Web' if compression_level == 'Medium' else 'Email attachments' if compression_level == 'High (Smaller Size)' else 'Maximum compression'}
+        **Current Settings:**
+        - Image Quality: {image_quality}%
+        - Expected reduction: {'20-40%' if compression_level == 'Low (Best Quality)' else '40-60%' if compression_level == 'Medium (Recommended)' else '60-80%' if compression_level == 'High (Smaller Size)' else '70-90%'}
         """)
         
         output_filename = st.text_input("Output filename:", "compressed.pdf")
         
         if st.button("🗜️ Compress PDF", type="primary"):
             try:
-                with st.spinner(f"Compressing PDF at {compression_level}..."):
-                    # Save uploaded file temporarily
-                    temp_input = "temp_compress_input.pdf"
-                    temp_output = "temp_compress_output.pdf"
+                with st.spinner(f"Compressing PDF with {compression_level}..."):
+                    import os
                     
+                    temp_input = "temp_compress_in.pdf"
+                    temp_output = "temp_compress_out.pdf"
+                    
+                    # Save uploaded file
                     with open(temp_input, "wb") as f:
                         f.write(uploaded_file.getvalue())
                     
                     # Open PDF with PyMuPDF
                     doc = fitz.open(temp_input)
                     
-                    # Compress and save (FIXED PARAMETERS)
+                    total_images = 0
+                    compressed_images = 0
+                    
+                    # Process each page
+                    for page_index in range(len(doc)):
+                        page = doc[page_index]
+                        image_list = page.get_images(full=True)
+                        
+                        total_images += len(image_list)
+                        
+                        # Process each image on the page
+                        for img_index, img_info in enumerate(image_list):
+                            xref = img_info[0]
+                            
+                            try:
+                                # Extract the image
+                                base_image = doc.extract_image(xref)
+                                image_bytes = base_image["image"]
+                                image_ext = base_image["ext"]
+                                
+                                # Load image with PIL
+                                pil_image = Image.open(io.BytesIO(image_bytes))
+                                
+                                # Convert RGBA to RGB if needed
+                                if pil_image.mode in ("RGBA", "LA", "P"):
+                                    background = Image.new("RGB", pil_image.size, (255, 255, 255))
+                                    if pil_image.mode == "P":
+                                        pil_image = pil_image.convert("RGBA")
+                                    background.paste(pil_image, mask=pil_image.split()[-1] if pil_image.mode in ("RGBA", "LA") else None)
+                                    pil_image = background
+                                elif pil_image.mode != "RGB":
+                                    pil_image = pil_image.convert("RGB")
+                                
+                                # Compress the image
+                                compressed_img_bytes = io.BytesIO()
+                                pil_image.save(
+                                    compressed_img_bytes,
+                                    format="JPEG",
+                                    quality=image_quality,
+                                    optimize=True
+                                )
+                                compressed_img_bytes.seek(0)
+                                
+                                # Replace the image in PDF
+                                # Get image rectangle
+                                img_rects = page.get_image_rects(xref)
+                                
+                                if img_rects:
+                                    # Remove old image reference
+                                    page.delete_image(xref)
+                                    
+                                    # Insert compressed image
+                                    for rect in img_rects:
+                                        page.insert_image(
+                                            rect,
+                                            stream=compressed_img_bytes.getvalue()
+                                        )
+                                    
+                                    compressed_images += 1
+                            
+                            except Exception as e:
+                                # Skip if image can't be compressed
+                                continue
+                    
+                    # Save compressed PDF
                     doc.save(
                         temp_output,
                         garbage=4,
@@ -324,76 +389,26 @@ elif tool == "🗜️ Compress PDF":
                     )
                     doc.close()
                     
-                    # Now compress images in the PDF
-                    doc2 = fitz.open(temp_output)
-                    
-                    for page_num in range(len(doc2)):
-                        page = doc2[page_num]
-                        
-                        # Get all images on page
-                        image_list = page.get_images()
-                        
-                        for img_index, img in enumerate(image_list):
-                            xref = img[0]
-                            
-                            try:
-                                # Extract image
-                                base_image = doc2.extract_image(xref)
-                                image_bytes = base_image["image"]
-                                
-                                # Convert to PIL Image
-                                pil_image = Image.open(io.BytesIO(image_bytes))
-                                
-                                # Resize if too large
-                                max_dim = settings['dpi'] * 10
-                                if pil_image.width > max_dim or pil_image.height > max_dim:
-                                    pil_image.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
-                                
-                                # Compress image
-                                output_buffer = io.BytesIO()
-                                
-                                if pil_image.mode == "RGBA":
-                                    pil_image = pil_image.convert("RGB")
-                                
-                                pil_image.save(
-                                    output_buffer,
-                                    format="JPEG",
-                                    quality=settings['quality'],
-                                    optimize=True
-                                )
-                                
-                                # Replace image in PDF
-                                compressed_image = output_buffer.getvalue()
-                                
-                                # Note: Advanced image replacement removed for compatibility
-                                # Simply reinsert compressed image
-                            
-                            except:
-                                continue
-                    
-                    # Final save with all optimizations (FIXED PARAMETERS)
-                    final_output = "final_compressed.pdf"
-                    doc2.save(
-                        final_output,
-                        garbage=4,
-                        deflate=True,
-                        clean=True
-                    )
-                    doc2.close()
-                    
                     # Read compressed file
-                    with open(final_output, "rb") as f:
+                    with open(temp_output, "rb") as f:
                         compressed_data = f.read()
                     
                     compressed_size = len(compressed_data) / 1024
                     reduction = ((original_size - compressed_size) / original_size) * 100
                     
-                    if reduction > 0:
+                    # Show results
+                    if reduction > 5:
                         st.success(f"""
                         ✅ **Compression Successful!**
-                        - Original: **{original_size:.2f} KB** ({original_size/1024:.2f} MB)
-                        - Compressed: **{compressed_size:.2f} KB** ({compressed_size/1024:.2f} MB)
-                        - **{reduction:.1f}% reduction** 🎉
+                        
+                        📊 **Results:**
+                        - Original Size: **{original_size:.2f} KB** ({original_size/1024:.2f} MB)
+                        - Compressed Size: **{compressed_size:.2f} KB** ({compressed_size/1024:.2f} MB)
+                        - **Reduction: {reduction:.1f}%** 🎉
+                        
+                        🖼️ **Images Processed:**
+                        - Total images found: {total_images}
+                        - Images compressed: {compressed_images}
                         """)
                         
                         st.download_button(
@@ -403,8 +418,17 @@ elif tool == "🗜️ Compress PDF":
                             mime="application/pdf",
                             type="primary"
                         )
-                    else:
-                        st.warning("⚠️ File already optimized. Minimal compression achieved.")
+                    
+                    elif reduction > 0:
+                        st.warning(f"""
+                        ⚠️ **Small Compression Achieved ({reduction:.1f}%)**
+                        
+                        Your PDF is already well-optimized or contains mostly text.
+                        
+                        - Original: {original_size:.2f} KB
+                        - Compressed: {compressed_size:.2f} KB
+                        - Images found: {total_images}
+                        """)
                         
                         st.download_button(
                             label="📥 Download PDF",
@@ -413,14 +437,27 @@ elif tool == "🗜️ Compress PDF":
                             mime="application/pdf"
                         )
                     
+                    else:
+                        st.info("""
+                        ℹ️ **PDF Already Optimized**
+                        
+                        This PDF is already compressed or contains minimal images.
+                        
+                        **Possible reasons:**
+                        - PDF contains mostly text (no images to compress)
+                        - Images are already compressed
+                        - PDF is vector-based
+                        
+                        Try using the original file instead.
+                        """)
+                    
                     # Cleanup
-                    import os
                     os.remove(temp_input)
                     os.remove(temp_output)
-                    os.remove(final_output)
-            
+                
             except Exception as e:
-                st.error(f"❌ Error: {str(e)}")
+                st.error(f"❌ Error during compression: {str(e)}")
+                st.info("💡 Try a different compression level or check if PDF is valid")
 
 # TOOL 6: ROTATE PAGES
 elif tool == "🔄 Rotate Pages":
@@ -877,4 +914,5 @@ elif tool == "🔍 OCR - Image to Searchable PDF":
 # Footer
 st.sidebar.markdown("---")
 st.sidebar.markdown("**Made for Accountants** 💼")
+
 
