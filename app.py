@@ -8,6 +8,7 @@ import pandas as pd
 import pytesseract
 from pdf2image import convert_from_bytes
 from PIL import Image
+import fitz  # PyMuPDF
 
 st.set_page_config(page_title="PDF Tools Pro", page_icon="📄", layout="wide")
 
@@ -263,44 +264,165 @@ elif tool == "🔓 Remove Password":
             else:
                 st.error("❌ Please enter the password")
 
-# TOOL 5: COMPRESS PDF
+# TOOL 5: COMPRESS PDF (IMPROVED WITH QUALITY CONTROL)
 elif tool == "🗜️ Compress PDF":
     st.header("🗜️ Compress PDF")
-    st.info("📌 Reduce PDF file size")
+    st.info("📌 Reduce PDF file size with adjustable quality")
     
     uploaded_file = st.file_uploader("Upload PDF", type=['pdf'], key="compress")
     
     if uploaded_file:
         original_size = len(uploaded_file.getvalue()) / 1024
-        st.info(f"📦 Original size: **{original_size:.2f} KB**")
+        st.info(f"📦 Original size: **{original_size:.2f} KB** ({original_size/1024:.2f} MB)")
+        
+        st.markdown("### Compression Settings")
+        
+        compression_level = st.select_slider(
+            "Compression Level:",
+            options=["Low (Best Quality)", "Medium", "High (Smaller Size)", "Maximum"],
+            value="Medium"
+        )
+        
+        # Map compression levels to settings
+        compression_settings = {
+            "Low (Best Quality)": {"dpi": 150, "quality": 90},
+            "Medium": {"dpi": 100, "quality": 75},
+            "High (Smaller Size)": {"dpi": 72, "quality": 60},
+            "Maximum": {"dpi": 50, "quality": 40}
+        }
+        
+        settings = compression_settings[compression_level]
+        
+        st.info(f"""
+        **Settings for {compression_level}:**
+        - Image Resolution: {settings['dpi']} DPI
+        - Image Quality: {settings['quality']}%
+        - Good for: {'Printing' if compression_level == 'Low (Best Quality)' else 'Email/Web' if compression_level == 'Medium' else 'Email attachments' if compression_level == 'High (Smaller Size)' else 'Maximum compression'}
+        """)
         
         output_filename = st.text_input("Output filename:", "compressed.pdf")
         
         if st.button("🗜️ Compress PDF", type="primary"):
             try:
-                reader = PdfReader(uploaded_file)
-                writer = PdfWriter()
-                
-                for page in reader.pages:
-                    page.compress_content_streams()
-                    writer.add_page(page)
-                
-                output = io.BytesIO()
-                writer.write(output)
-                output.seek(0)
-                
-                compressed_size = len(output.getvalue()) / 1024
-                reduction = ((original_size - compressed_size) / original_size) * 100
-                
-                st.success(f"✅ Compressed! New size: **{compressed_size:.2f} KB** ({reduction:.1f}% reduction)")
-                
-                st.download_button(
-                    label="📥 Download Compressed PDF",
-                    data=output,
-                    file_name=output_filename,
-                    mime="application/pdf",
-                    type="primary"
-                )
+                with st.spinner(f"Compressing PDF at {compression_level}..."):
+                    # Save uploaded file temporarily
+                    temp_input = "temp_compress_input.pdf"
+                    temp_output = "temp_compress_output.pdf"
+                    
+                    with open(temp_input, "wb") as f:
+                        f.write(uploaded_file.getvalue())
+                    
+                    # Open PDF with PyMuPDF
+                    doc = fitz.open(temp_input)
+                    
+                    # Compress and save
+                    doc.save(
+                        temp_output,
+                        garbage=4,
+                        deflate=True,
+                        clean=True,
+                        linearize=True
+                    )
+                    doc.close()
+                    
+                    # Now compress images in the PDF
+                    doc2 = fitz.open(temp_output)
+                    
+                    for page_num in range(len(doc2)):
+                        page = doc2[page_num]
+                        
+                        # Get all images on page
+                        image_list = page.get_images()
+                        
+                        for img_index, img in enumerate(image_list):
+                            xref = img[0]
+                            
+                            try:
+                                # Extract image
+                                base_image = doc2.extract_image(xref)
+                                image_bytes = base_image["image"]
+                                
+                                # Convert to PIL Image
+                                pil_image = Image.open(io.BytesIO(image_bytes))
+                                
+                                # Resize if too large
+                                max_dim = settings['dpi'] * 10
+                                if pil_image.width > max_dim or pil_image.height > max_dim:
+                                    pil_image.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
+                                
+                                # Compress image
+                                output_buffer = io.BytesIO()
+                                
+                                if pil_image.mode == "RGBA":
+                                    pil_image = pil_image.convert("RGB")
+                                
+                                pil_image.save(
+                                    output_buffer,
+                                    format="JPEG",
+                                    quality=settings['quality'],
+                                    optimize=True
+                                )
+                                
+                                compressed_image = output_buffer.getvalue()
+                                doc2._deleteObject(xref)
+                                
+                                page.insert_image(
+                                    page.rect,
+                                    stream=compressed_image,
+                                    xref=xref
+                                )
+                            
+                            except:
+                                continue
+                    
+                    # Final save with all optimizations
+                    final_output = "final_compressed.pdf"
+                    doc2.save(
+                        final_output,
+                        garbage=4,
+                        deflate=True,
+                        clean=True,
+                        linearize=True
+                    )
+                    doc2.close()
+                    
+                    # Read compressed file
+                    with open(final_output, "rb") as f:
+                        compressed_data = f.read()
+                    
+                    compressed_size = len(compressed_data) / 1024
+                    reduction = ((original_size - compressed_size) / original_size) * 100
+                    
+                    if reduction > 0:
+                        st.success(f"""
+                        ✅ **Compression Successful!**
+                        - Original: **{original_size:.2f} KB** ({original_size/1024:.2f} MB)
+                        - Compressed: **{compressed_size:.2f} KB** ({compressed_size/1024:.2f} MB)
+                        - **{reduction:.1f}% reduction** 🎉
+                        """)
+                        
+                        st.download_button(
+                            label=f"📥 Download Compressed PDF ({reduction:.0f}% smaller)",
+                            data=compressed_data,
+                            file_name=output_filename,
+                            mime="application/pdf",
+                            type="primary"
+                        )
+                    else:
+                        st.warning("⚠️ File already optimized")
+                        
+                        st.download_button(
+                            label="📥 Download PDF",
+                            data=compressed_data,
+                            file_name=output_filename,
+                            mime="application/pdf"
+                        )
+                    
+                    # Cleanup
+                    import os
+                    os.remove(temp_input)
+                    os.remove(temp_output)
+                    os.remove(final_output)
             
             except Exception as e:
                 st.error(f"❌ Error: {str(e)}")
@@ -435,7 +557,7 @@ elif tool == "🏷️ Add Watermark/Stamp":
                     can.restoreState()
                     can.save()
                     
-                    # Move to beginning of BytesIO
+                    # Move to beginning
                     packet.seek(0)
                     watermark_pdf = PdfReader(packet)
                     watermark_page = watermark_pdf.pages[0]
@@ -467,10 +589,10 @@ elif tool == "🏷️ Add Watermark/Stamp":
             else:
                 st.error("❌ Please enter watermark text")
 
-# TOOL 8: PDF TO EXCEL
+# TOOL 8: PDF TO EXCEL (IMPROVED WITH MULTIPLE METHODS)
 elif tool == "📊 PDF to Excel":
     st.header("📊 PDF to Excel Converter")
-    st.info("📌 Extract tables from PDF and convert to Excel")
+    st.info("📌 Extract tables from PDF and convert to Excel (works on scanned & structured PDFs)")
     
     uploaded_file = st.file_uploader("Upload PDF with tables", type=['pdf'], key="pdf2excel")
     
@@ -478,8 +600,13 @@ elif tool == "📊 PDF to Excel":
         st.success("✅ PDF loaded")
         
         extraction_method = st.radio(
-            "Extraction method:",
-            ["Auto-detect", "Lattice (for bordered tables)", "Stream (for borderless tables)"]
+            "Select extraction method:",
+            [
+                "🤖 Auto-detect (Recommended)",
+                "📋 Structured Tables (Camelot - bordered tables)",
+                "📄 Stream Method (borderless tables)",
+                "🔍 OCR Method (scanned documents)"
+            ]
         )
         
         if st.button("📊 Extract Tables", type="primary"):
@@ -490,47 +617,150 @@ elif tool == "📊 PDF to Excel":
                     with open(temp_pdf, "wb") as f:
                         f.write(uploaded_file.getvalue())
                     
-                    # Extract tables based on method
-                    if extraction_method == "Lattice (for bordered tables)":
-                        tables = camelot.read_pdf(temp_pdf, flavor='lattice', pages='all')
-                    elif extraction_method == "Stream (for borderless tables)":
-                        tables = camelot.read_pdf(temp_pdf, flavor='stream', pages='all')
-                    else:
-                        tables = camelot.read_pdf(temp_pdf, pages='all')
+                    extracted_tables = []
                     
-                    if len(tables) > 0:
-                        st.success(f"✅ Found **{len(tables)}** table(s)!")
+                    # Method 1: Try Camelot (for structured tables)
+                    if extraction_method in ["🤖 Auto-detect (Recommended)", "📋 Structured Tables (Camelot - bordered tables)", "📄 Stream Method (borderless tables)"]:
+                        try:
+                            if extraction_method == "📋 Structured Tables (Camelot - bordered tables)":
+                                tables = camelot.read_pdf(temp_pdf, flavor='lattice', pages='all')
+                            elif extraction_method == "📄 Stream Method (borderless tables)":
+                                tables = camelot.read_pdf(temp_pdf, flavor='stream', pages='all')
+                            else:  # Auto-detect
+                                tables = camelot.read_pdf(temp_pdf, pages='all')
+                            
+                            if len(tables) > 0:
+                                for table in tables:
+                                    extracted_tables.append(table.df)
+                                st.info(f"✅ Found **{len(tables)}** table(s) using Camelot")
+                        
+                        except Exception as e:
+                            if extraction_method != "🤖 Auto-detect (Recommended)":
+                                st.warning(f"⚠️ Camelot method failed: {str(e)}")
+                    
+                    # Method 2: If no tables found, try PyMuPDF text extraction
+                    if len(extracted_tables) == 0 and extraction_method in ["🤖 Auto-detect (Recommended)", "🔍 OCR Method (scanned documents)"]:
+                        try:
+                            doc = fitz.open(temp_pdf)
+                            
+                            st.info("Trying PDF text extraction method...")
+                            
+                            # Extract text from each page
+                            for page_num in range(len(doc)):
+                                page = doc[page_num]
+                                
+                                # Get tables using PyMuPDF's table detection
+                                try:
+                                    tables = page.find_tables()
+                                    
+                                    for table in tables:
+                                        df = table.to_pandas()
+                                        if len(df) > 0:
+                                            extracted_tables.append(df)
+                                
+                                except:
+                                    # If no tables found, extract text and try to parse as CSV
+                                    text = page.get_text()
+                                    lines = text.strip().split('\n')
+                                    
+                                    # Check if lines contain table-like data
+                                    if lines and len(lines) > 2:
+                                        try:
+                                            # Try to parse as tab-separated or space-separated
+                                            from io import StringIO
+                                            parsed_text = '\n'.join(lines)
+                                            
+                                            # Try to create DataFrame from text
+                                            if '\t' in parsed_text:
+                                                df = pd.read_csv(StringIO(parsed_text), sep='\t', on_bad_lines='skip')
+                                            else:
+                                                # Use regex to find columnar data
+                                                import re
+                                                df_data = []
+                                                for line in lines:
+                                                    cols = re.split(r'\s{2,}', line.strip())
+                                                    if len(cols) > 1:
+                                                        df_data.append(cols)
+                                                
+                                                if df_data:
+                                                    df = pd.DataFrame(df_data[1:], columns=df_data[0] if df_data else None)
+                                            
+                                            if len(df) > 0:
+                                                extracted_tables.append(df)
+                                        except:
+                                            pass
+                            
+                            doc.close()
+                            
+                            if len(extracted_tables) > 0:
+                                st.info(f"✅ Found **{len(extracted_tables)}** table(s) using text extraction")
+                        
+                        except Exception as e:
+                            st.warning(f"⚠️ Text extraction failed: {str(e)}")
+                    
+                    # Method 3: Last resort - OCR for scanned PDFs
+                    if len(extracted_tables) == 0 and extraction_method == "🔍 OCR Method (scanned documents)":
+                        try:
+                            st.info("Using OCR for scanned document...")
+                            
+                            images = convert_from_bytes(uploaded_file.read())
+                            
+                            for i, img in enumerate(images, 1):
+                                st.info(f"Processing page {i}/{len(images)} with OCR...")
+                                
+                                # Extract text with OCR
+                                text = pytesseract.image_to_string(img)
+                                
+                                # Parse text into table
+                                lines = text.strip().split('\n')
+                                df_data = []
+                                
+                                for line in lines:
+                                    if line.strip():
+                                        cols = line.split()
+                                        df_data.append(cols)
+                                
+                                if df_data and len(df_data) > 1:
+                                    df = pd.DataFrame(df_data[1:], columns=df_data[0])
+                                    extracted_tables.append(df)
+                        
+                        except Exception as e:
+                            st.warning(f"⚠️ OCR failed: {str(e)}")
+                    
+                    # Show results
+                    if len(extracted_tables) > 0:
+                        st.success(f"✅ Successfully extracted **{len(extracted_tables)}** table(s)!")
                         
                         # Show preview of each table
-                        for i, table in enumerate(tables, 1):
-                            with st.expander(f"📋 Table {i} (Page {table.page})"):
-                                st.dataframe(table.df)
+                        for i, df in enumerate(extracted_tables, 1):
+                            with st.expander(f"📋 Table {i} ({len(df)} rows × {len(df.columns)} columns)"):
+                                st.dataframe(df, use_container_width=True)
                         
                         # Export options
                         export_format = st.radio(
                             "Export format:",
-                            ["Single Excel file (multiple sheets)", "Separate Excel files", "CSV files"]
+                            ["Single Excel (multiple sheets)", "Separate CSV files"]
                         )
                         
-                        if export_format == "Single Excel file (multiple sheets)":
+                        if export_format == "Single Excel (multiple sheets)":
                             output = io.BytesIO()
                             with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                                for i, table in enumerate(tables, 1):
-                                    table.df.to_excel(writer, sheet_name=f'Table_{i}', index=False)
+                                for i, df in enumerate(extracted_tables, 1):
+                                    df.to_excel(writer, sheet_name=f'Table_{i}', index=False)
                             
                             output.seek(0)
                             
                             st.download_button(
                                 label="📥 Download Excel File",
                                 data=output,
-                                file_name="tables.xlsx",
+                                file_name="extracted_tables.xlsx",
                                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                 type="primary"
                             )
                         
-                        elif export_format == "CSV files":
-                            for i, table in enumerate(tables, 1):
-                                csv_data = table.df.to_csv(index=False)
+                        else:  # CSV files
+                            for i, df in enumerate(extracted_tables, 1):
+                                csv_data = df.to_csv(index=False)
                                 st.download_button(
                                     label=f"📥 Download Table {i} as CSV",
                                     data=csv_data,
@@ -539,7 +769,16 @@ elif tool == "📊 PDF to Excel":
                                 )
                     
                     else:
-                        st.warning("⚠️ No tables found in PDF")
+                        st.error("❌ No tables found in PDF")
+                        
+                        st.markdown("""
+                        ### 💡 Troubleshooting Tips:
+                        
+                        1. **Try different extraction methods**
+                        2. **Ensure PDF has tables**
+                        3. **Check PDF quality**
+                        4. **For scanned documents** - Use OCR method
+                        """)
                     
                     # Cleanup
                     import os
@@ -547,7 +786,6 @@ elif tool == "📊 PDF to Excel":
             
             except Exception as e:
                 st.error(f"❌ Error: {str(e)}")
-                st.info("💡 Try switching extraction method or ensure PDF contains tables")
 
 # TOOL 9: OCR - IMAGE TO SEARCHABLE PDF
 elif tool == "🔍 OCR - Image to Searchable PDF":
@@ -574,7 +812,7 @@ elif tool == "🔍 OCR - Image to Searchable PDF":
         
         if st.button("🔍 Perform OCR", type="primary"):
             try:
-                with st.spinner("Performing OCR... This may take a minute"):
+                with st.spinner("Performing OCR..."):
                     
                     if 'image' in file_type:
                         # Process image
@@ -597,7 +835,7 @@ elif tool == "🔍 OCR - Image to Searchable PDF":
                         
                         with col1:
                             st.download_button(
-                                label="📥 Download as Text (.txt)",
+                                label="📥 Download as Text",
                                 data=text,
                                 file_name="extracted_text.txt",
                                 mime="text/plain"
@@ -640,7 +878,6 @@ elif tool == "🔍 OCR - Image to Searchable PDF":
             
             except Exception as e:
                 st.error(f"❌ Error: {str(e)}")
-                st.info("💡 Make sure Tesseract OCR is installed on the server")
 
 # Footer
 st.sidebar.markdown("---")
